@@ -32,6 +32,33 @@ class Instruction:
             return f"{self.opcode} {self.dest}, {self.op1}, {self.op2}"
 
 
+class DepTableEntry:
+    def __init__(self, id, opcode, destination):
+        self.id = id
+        self.opcode = opcode
+        self.destination = destination
+        self.local_dep = []
+        self.interloop_dep = []
+        self.invariant_dep = []
+        self.post_dep = []
+
+    def add_local_dep(self, reg, id):
+        self.local_dep.append((reg, id))
+
+    def add_interloop_dep(self, reg, id):
+        self.interloop_dep.append((reg, id))
+
+    def add_invariant_dep(self, reg, id):
+        self.invariant_dep.append((reg, id))
+
+    def add_postloop_dep(self, reg, id):
+        self.post_dep.append((reg, id))
+
+    def to_string(self):
+        empty = "__________"
+        return f"{self.id} ({self.opcode}) - {self.destination if not self.opcode == 'st' else '___'} - {self.local_dep if len(self.local_dep) > 0 else empty}  - {self.interloop_dep if len(self.interloop_dep) > 0 else empty} - {self.invariant_dep if len(self.invariant_dep) > 0 else empty} - {self.post_dep if len(self.post_dep) > 0 else empty} "
+
+
 class Scheduler:
     def __init__(self, filename, dump_to_file=False):
         self.filename = filename
@@ -39,6 +66,8 @@ class Scheduler:
 
         self.code = self.__parse_json()
         self.dep_table = self.__compute_deps()
+        for dep in self.dep_table:
+            print(dep.to_string())
         self.__schedule()
         self.__register_rename()
         if dump_to_file:
@@ -49,6 +78,9 @@ class Scheduler:
     def __get_latency(self, opcode):
         return 3 if opcode == "mulu" else 1
 
+    '''
+        st has the source value as destination register
+    '''
     def __parse_json(self):
         output = []
         with open(self.filename, "r") as file:
@@ -59,14 +91,20 @@ class Scheduler:
                 elif opcode == "nop":
                     output.append(Instruction(PC, opcode, None, None, None))
                     continue
-                elif opcode in ["ld", "st"]:
+                elif opcode == "ld":
                     destination_register = (registers[0].strip())
                     operand_1 = registers[1].strip()[registers[1].find("("): registers[1].find(")") - 1]
                     operand_2 = (registers[1].strip().split("(")[0])
                     output.append(Instruction(PC, opcode, destination_register, operand_1, operand_2))
                     continue
+                elif opcode == "st":
+                    operand_1 = (registers[0].strip())
+                    operand_2  = registers[1].strip()[registers[1].find("("): registers[1].find(")") - 1]
+                    destination_register= (registers[1].strip().split("(")[0])
+                    output.append(Instruction(PC, opcode, destination_register, operand_1, operand_2))
+                    continue
                 elif opcode in ["loop", "loop.pip"]:
-                    output.append(Instruction(PC, opcode, registers[0], None, None))
+                    output.append(Instruction(PC, opcode, registers[0].strip(), None, None))
                     continue
                 elif opcode == "mov":
                     destination_register = (registers[0].strip())
@@ -81,7 +119,51 @@ class Scheduler:
         return output
 
     def __compute_deps(self):
-        return None
+        dep_table = []
+        loop_start = -1
+        loop_end = -1
+        for instr in self.code:
+            if instr.opcode in ["loop", "loop.pip"]:
+                loop_end = instr.pc
+                loop_start = int(instr.dest)
+        assert loop_start != -1 and loop_end != -1
+
+        # local + post + loop invariant
+        # This will introduce wrong dependencies classified as invariants which will have to be fixed when considering
+        # interloop dependencies
+        for instr in self.code:
+            deps = []
+            found_1 = False
+            found_2 = False
+            for i in range(len(dep_table) - 1, -1, -1):
+                entry = dep_table[i]
+                #if entry.id >= instr.pc:break
+                if entry.opcode == "st":continue
+                if not found_1 and entry.destination == instr.op1:
+                    deps.append((instr.op1, entry.id))
+                    found_1 = True
+                if not found_2 and entry.destination == instr.op2:
+                    deps.append((instr.op2, entry.id))
+                    found_2 = True
+                if found_1 and found_2:break
+
+            dep = DepTableEntry(instr.pc, instr.opcode, instr.dest)
+            for op_dep in deps:
+                if instr.pc < loop_start: dep.add_local_dep(*op_dep)
+                elif instr.pc < loop_end:
+                    if op_dep[1] < loop_start: dep.add_invariant_dep(*op_dep)
+                    else: dep.add_local_dep(*op_dep)
+                else:
+                    if op_dep[1] < loop_start: dep.add_invariant_dep(*op_dep)
+                    elif op_dep[1] < loop_end: dep.add_postloop_dep(*op_dep)
+                    else: dep.add_local_dep(*op_dep)
+            dep_table.append(dep)
+
+        # Inter-loop Dependencies
+
+
+        return dep_table
+
 
     def __schedule(self):
         pass
