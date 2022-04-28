@@ -1,5 +1,5 @@
 from scheduler import Scheduler
 
-sched = Scheduler("handout_3.json")
+sched = Scheduler("handout_4.json")
 
 #TODO: DEBUG HANDOUT_3

@@ -103,7 +103,6 @@ class DepTableEntry:
         self.invariant_dep = []
         self.post_dep = []
 
-
     def add_local_dep(self, reg, id):
         self.local_dep.append((reg, id))
 
@@ -159,20 +158,22 @@ class Scheduler:
 
     def __is_loop_program(self):
         for instr in self.code:
-            if instr.opcode=="loop":
+            if instr.opcode == "loop":
                 return True
         return False
 
     '''
         st has the immediate as destination register
     '''
+
     def __parse_json(self):
         output = []
         with open(self.filename, "r") as file:
             for PC, instruction in enumerate(json.load(file)):
                 opcode = instruction.split(" ")[0].strip()
                 registers = instruction[instruction.find(" "):].split(",")
-                if opcode == "addi": opcode = "add"
+                if opcode == "addi":
+                    opcode = "add"
                 elif opcode == "nop":
                     output.append(Instruction(PC, opcode, None, None, None))
                     continue
@@ -184,8 +185,8 @@ class Scheduler:
                     continue
                 elif opcode == "st":
                     operand_1 = (registers[0].strip())
-                    operand_2  = registers[1].strip()[registers[1].find("("): registers[1].find(")") - 1]
-                    destination_register= (registers[1].strip().split("(")[0])
+                    operand_2 = registers[1].strip()[registers[1].find("("): registers[1].find(")") - 1]
+                    destination_register = (registers[1].strip().split("(")[0])
                     output.append(Instruction(PC, opcode, destination_register, operand_1, operand_2))
                     continue
                 elif opcode in ["loop", "loop.pip"]:
@@ -224,26 +225,32 @@ class Scheduler:
             found_2 = False
             for i in range(len(dep_table) - 1, -1, -1):
                 entry = dep_table[i]
-                #if entry.id >= instr.pc:break
-                if entry.opcode == "st":continue
+                # if entry.id >= instr.pc:break
+                if entry.opcode == "st": continue
                 if not found_1 and entry.destination == instr.op1:
                     deps.append((instr.op1, entry.id))
                     found_1 = True
                 if not found_2 and entry.destination == instr.op2:
                     deps.append((instr.op2, entry.id))
                     found_2 = True
-                if found_1 and found_2:break
+                if found_1 and found_2: break
 
             dep = DepTableEntry(instr.pc, instr.opcode, instr.dest)
             for op_dep in deps:
-                if instr.pc < loop_start: dep.add_local_dep(*op_dep)
+                if instr.pc < loop_start:
+                    dep.add_local_dep(*op_dep)
                 elif instr.pc < loop_end:
-                    if op_dep[1] < loop_start: dep.add_invariant_dep(*op_dep)
-                    else: dep.add_local_dep(*op_dep)
+                    if op_dep[1] < loop_start:
+                        dep.add_invariant_dep(*op_dep)
+                    else:
+                        dep.add_local_dep(*op_dep)
                 else:
-                    if op_dep[1] < loop_start: dep.add_invariant_dep(*op_dep)
-                    elif op_dep[1] < loop_end: dep.add_postloop_dep(*op_dep)
-                    else: dep.add_local_dep(*op_dep)
+                    if op_dep[1] < loop_start:
+                        dep.add_invariant_dep(*op_dep)
+                    elif op_dep[1] < loop_end:
+                        dep.add_postloop_dep(*op_dep)
+                    else:
+                        dep.add_local_dep(*op_dep)
             dep_table.append(dep)
 
         # Inter-loop Dependencies
@@ -276,19 +283,21 @@ class Scheduler:
         return dep_table
 
     def __fix_schedule(self, scheduled_slots):
-        #compute delta
+        # compute delta
         delta = -1
+        to_be_fixed = False
+        end_loop = scheduled_slots[self.loop_end]
+        start_loop = scheduled_slots[self.loop_start]
         for entry in self.dep_table:
             interloops = entry.interloop_dep
             for dep in interloops:
                 s_c = scheduled_slots[entry.id]
                 lambda_p = self.__get_latency(entry.opcode)
-                s_p =  scheduled_slots[dep[1]]
+                s_p = scheduled_slots[dep[1]]
                 if s_p + lambda_p > s_c + self.ii:
-                    end_loop = scheduled_slots[self.loop_end]
-                    start_loop = scheduled_slots[self.loop_start]
+                    to_be_fixed = True
                     curr_delta = end_loop - s_p + s_c - start_loop + 1
-                    if curr_delta > delta: delta = curr_delta 
+                    if curr_delta > delta: delta = curr_delta
         for i in range(delta):
             self.final_schedule.insert(end_loop + 1, Bundle(end_loop + 1))
             for j in range(len(scheduled_slots)):
@@ -296,11 +305,11 @@ class Scheduler:
             scheduled_slots[self.loop_end] += 1
             self.ii += 1
         # Swapping the loop position
-        self.final_schedule[self.loop_end].set_br(self.final_schedule[self.loop_end - delta].br)
-        self.final_schedule[self.loop_end - delta].br = None
-        for i in range(len(self.final_schedule)):
-            self.final_schedule[i].pc = i
-
+        if to_be_fixed:
+            self.final_schedule[self.loop_end].set_br(self.final_schedule[self.loop_end - delta].br)
+            self.final_schedule[self.loop_end - delta].br = None
+            for i in range(len(self.final_schedule)):
+                self.final_schedule[i].pc = i
 
     def __schedule_loop(self):
         pc = 0
@@ -318,7 +327,7 @@ class Scheduler:
                     if scheduled_slot[self.loop_start:self.loop_end].count(-10) == 0:
                         end_loop_reached = True
                     if not end_loop_reached: break
-                if scheduled_slot[i] != -10:continue
+                if scheduled_slot[i] != -10: continue
                 deps = instr.get_all_deps()
                 earliest_time = -10
                 for dep in deps:
@@ -329,13 +338,12 @@ class Scheduler:
                     res = self.final_schedule[pc].schedule_instr(instr)
                     if res:
                         scheduled_slot[i] = pc
-                if i == self.loop_end:break # to split bb2 from bb1
+                if i == self.loop_end: break  # to split bb2 from bb1
             pc += 1
         self.ii = scheduled_slot[self.loop_end] - scheduled_slot[self.loop_start] + 1
-        
+
         self.__fix_schedule(scheduled_slot)
         # TODO: update loop target
-
 
     def __schedule_loop_pip(self):
         pass
