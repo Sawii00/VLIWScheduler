@@ -2,13 +2,32 @@ import json
 
 
 class Bundle:
-    def __init__(self, alu0, alu1, mul, mem, br):
+    def __init__(self, pc):
         assert alu0.opcode in ["add", "sub", "mov"] or alu0.opcode == "nop"
         assert alu1.opcode in ["add", "sub", "mov"] or alu1.opcode == "nop"
         assert mul.opcode == "mulu" or mul.opcode == "nop"
         assert mem.opcode in ["ld", "st"] or mem.opcode == "nop"
         assert br.opcode in ["loop", "loop.pip"] or br.opcode == "nop"
-        self.bundle = (alu0, alu1, mul, mem, br)
+        self.pc = pc
+        self.bundle = [None for i in range(5)]
+
+    def set_alu0(self, instr):
+        self.bundle[0] = instr
+
+    def set_alu1(self, instr):
+        self.bundle[1] = instr
+
+    def set_mul(self, instr):
+        self.bundle[2] = instr
+
+    def set_mem(self, instr):
+        self.bundle[3] = instr
+
+    def set_br(self, instr):
+        self.bundle[4] = instr
+
+    def to_string(self):
+        return f"Bundle({self.pc}): {self.bundle[0]} - {self.bundle[1]} - {self.bundle[2]} - {self.bundle[3]} - {self.bundle[4]}"
 
 
 class Instruction:
@@ -54,6 +73,9 @@ class DepTableEntry:
     def add_postloop_dep(self, reg, id):
         self.post_dep.append((reg, id))
 
+    def get_all_deps(self):
+        return self.local_dep + self.interloop_dep + self.invariant_dep + self.post_dep
+
     def to_string(self):
         empty = "__________"
         return f"{self.id} ({self.opcode}) - {self.destination if not self.opcode in ['st', 'loop', 'loop.pip'] else '___'} - {self.local_dep if len(self.local_dep) > 0 else empty}  - {self.interloop_dep if len(self.interloop_dep) > 0 else empty} - {self.invariant_dep if len(self.invariant_dep) > 0 else empty} - {self.post_dep if len(self.post_dep) > 0 else empty} "
@@ -68,8 +90,13 @@ class Scheduler:
         self.dep_table = self.__compute_deps()
         for dep in self.dep_table:
             print(dep.to_string())
-        self.__schedule()
+        # WE ARE NOT CHECKING THAT A LOOP EVEN EXISTS IN CODE (WE ASSUME IT IS THERE)
+        if self.__is_loop_program():
+            self.__schedule_loop()
+        else:
+            self.__schedule_loop_pip()
         self.__register_rename()
+
         if dump_to_file:
             self.dump_json(f"{filename[:filename.find('.json')]}_out.json")
         else:
@@ -77,6 +104,12 @@ class Scheduler:
 
     def __get_latency(self, opcode):
         return 3 if opcode == "mulu" else 1
+
+    def __is_loop_program(self):
+        for instr in self.code:
+            if instr.opcode=="loop":
+                return True
+        return False
 
     '''
         st has the immediate as destination register
@@ -188,8 +221,33 @@ class Scheduler:
 
         return dep_table
 
+    def __schedule_loop(self):
+        pc = 0
+        scheduled_slot = [-10 for i in range(len(self.dep_table))]
+        while True:
+            self.final_schedule.append(Bundle(pc))
+            for i, instr in enumerate(self.dep_table):
+                deps = instr.get_all_deps()
+                earliest_time = -10
+                for dep in deps:
+                    start_time = scheduled_slot[dep[1]] + self.__get_latency(self.dep_table[dep[1]].opcode)
+                    if start_time > earliest_time:
+                        earliest_time = start_time
+                if earliest_time <= pc and :
 
-    def __schedule(self):
+
+
+
+
+
+
+
+
+            pc += 1
+
+
+
+    def __schedule_loop_pip(self):
         pass
 
     def __register_rename(self):
