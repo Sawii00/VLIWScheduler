@@ -1,3 +1,5 @@
 from scheduler import Scheduler
 
-sched = Scheduler("handout.json")
+sched = Scheduler("handout_3.json")
+
+#TODO: DEBUG HANDOUT_3

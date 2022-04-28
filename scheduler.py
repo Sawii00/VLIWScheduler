@@ -152,6 +152,7 @@ class Scheduler:
             self.dump_json(f"{filename[:filename.find('.json')]}_out.json")
         else:
             print(self.get_schedule())
+            print(self.ii)
 
     def __get_latency(self, opcode):
         return 3 if opcode == "mulu" else 1
@@ -274,14 +275,39 @@ class Scheduler:
 
         return dep_table
 
+    def __fix_schedule(self, scheduled_slots):
+        #compute delta
+        delta = -1
+        for entry in self.dep_table:
+            interloops = entry.interloop_dep
+            for dep in interloops:
+                s_c = scheduled_slots[entry.id]
+                lambda_p = self.__get_latency(entry.opcode)
+                s_p =  scheduled_slots[dep[1]]
+                if s_p + lambda_p > s_c + self.ii:
+                    end_loop = scheduled_slots[self.loop_end]
+                    start_loop = scheduled_slots[self.loop_start]
+                    curr_delta = end_loop - s_p + s_c - start_loop + 1
+                    if curr_delta > delta: delta = curr_delta 
+        for i in range(delta):
+            self.final_schedule.insert(end_loop + 1, Bundle(end_loop + 1))
+            for j in range(len(scheduled_slots)):
+                if scheduled_slots[j] > scheduled_slots[self.loop_end]: scheduled_slots[j] += 1
+            scheduled_slots[self.loop_end] += 1
+            self.ii += 1
+        # Swapping the loop position
+        self.final_schedule[self.loop_end].set_br(self.final_schedule[self.loop_end - delta].br)
+        self.final_schedule[self.loop_end - delta].br = None
+        for i in range(len(self.final_schedule)):
+            self.final_schedule[i].pc = i
+
+
     def __schedule_loop(self):
         pc = 0
         scheduled_slot = [-10 for i in range(len(self.dep_table))]
         loop_reached = False
         end_loop_reached = False
-        while True:
-            if scheduled_slot.count(-10) == 0:
-                break
+        while scheduled_slot.count(-10) != 0:
             self.final_schedule.append(Bundle(pc))
             for i, instr in enumerate(self.dep_table):
                 if i == self.loop_start and not loop_reached:
@@ -303,9 +329,12 @@ class Scheduler:
                     res = self.final_schedule[pc].schedule_instr(instr)
                     if res:
                         scheduled_slot[i] = pc
+                if i == self.loop_end:break # to split bb2 from bb1
             pc += 1
-        print(self.final_schedule)
-
+        self.ii = scheduled_slot[self.loop_end] - scheduled_slot[self.loop_start] + 1
+        
+        self.__fix_schedule(scheduled_slot)
+        # TODO: update loop target
 
 
     def __schedule_loop_pip(self):
