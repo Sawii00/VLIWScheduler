@@ -3,31 +3,67 @@ import json
 
 class Bundle:
     def __init__(self, pc):
-        assert alu0.opcode in ["add", "sub", "mov"] or alu0.opcode == "nop"
-        assert alu1.opcode in ["add", "sub", "mov"] or alu1.opcode == "nop"
-        assert mul.opcode == "mulu" or mul.opcode == "nop"
-        assert mem.opcode in ["ld", "st"] or mem.opcode == "nop"
-        assert br.opcode in ["loop", "loop.pip"] or br.opcode == "nop"
         self.pc = pc
-        self.bundle = [None for i in range(5)]
+        self.alu0 = None
+        self.alu1 = None
+        self.mul = None
+        self.mem = None
+        self.br = None
 
-    def set_alu0(self, instr):
-        self.bundle[0] = instr
+    def set_alu0(self, alu0):
+        assert alu0.opcode in ["add", "sub", "mov"] or alu0.opcode == "nop"
+        self.alu0 = alu0
 
-    def set_alu1(self, instr):
-        self.bundle[1] = instr
+    def set_alu1(self, alu1):
+        assert alu1.opcode in ["add", "sub", "mov"] or alu1.opcode == "nop"
+        self.alu1 = alu1
 
-    def set_mul(self, instr):
-        self.bundle[2] = instr
+    def set_mul(self, mul):
+        assert mul.opcode == "mulu" or mul.opcode == "nop"
+        self.mul = mul
 
-    def set_mem(self, instr):
-        self.bundle[3] = instr
+    def set_mem(self, mem):
+        assert mem.opcode in ["ld", "st"] or mem.opcode == "nop"
+        self.mem = mem
 
-    def set_br(self, instr):
-        self.bundle[4] = instr
+    def set_br(self, br):
+        assert br.opcode in ["loop", "loop.pip"] or br.opcode == "nop"
+        self.br = br
+
+    def schedule_instr(self, instr):
+        if instr.opcode in ["add", "sub", "mov"]:
+            if self.alu0 is None:
+                self.alu0 = instr
+                return True
+            if self.alu1 is None:
+                self.alu1 = instr
+                return True
+            return False
+        elif instr.opcode == "mulu" and self.mul is None:
+            self.mul = instr
+            return True
+        elif instr.opcode in ["st", "ld"] and self.mem is None:
+            self.mem = instr
+            return True
+        elif instr.opcode.startswith("loop"):
+            if self.br is None:
+                self.br = instr
+                return True
+        return False
 
     def to_string(self):
-        return f"Bundle({self.pc}): {self.bundle[0]} - {self.bundle[1]} - {self.bundle[2]} - {self.bundle[3]} - {self.bundle[4]}"
+        alu0 = f"{chr(ord('A') + self.alu0.id)} ({self.alu0.opcode})" if self.alu0 is not None else None
+        alu1 = f"{chr(ord('A') + self.alu1.id)} ({self.alu1.opcode})" if self.alu1 is not None else None
+        mul = f"{chr(ord('A') + self.mul.id)} ({self.mul.opcode})" if self.mul is not None else None
+        mem = f"{chr(ord('A') + self.mem.id)} ({self.mem.opcode})" if self.mem is not None else None
+        br = f"{chr(ord('A') + self.br.id)} ({self.br.opcode})" if self.br is not None else None
+        return f"Bundle({self.pc}): {alu0} | {alu1} | {mul} | {mem} | {br}\n"
+
+    def __repr__(self):
+        return self.to_string()
+
+    def __str__(self):
+        return self.to_string()
 
 
 class Instruction:
@@ -50,6 +86,12 @@ class Instruction:
         else:
             return f"{self.opcode} {self.dest}, {self.op1}, {self.op2}"
 
+    def __repr__(self):
+        return self.to_string()
+
+    def __str__(self):
+        return self.to_string()
+
 
 class DepTableEntry:
     def __init__(self, id, opcode, destination):
@@ -60,6 +102,7 @@ class DepTableEntry:
         self.interloop_dep = []
         self.invariant_dep = []
         self.post_dep = []
+
 
     def add_local_dep(self, reg, id):
         self.local_dep.append((reg, id))
@@ -80,11 +123,19 @@ class DepTableEntry:
         empty = "__________"
         return f"{self.id} ({self.opcode}) - {self.destination if not self.opcode in ['st', 'loop', 'loop.pip'] else '___'} - {self.local_dep if len(self.local_dep) > 0 else empty}  - {self.interloop_dep if len(self.interloop_dep) > 0 else empty} - {self.invariant_dep if len(self.invariant_dep) > 0 else empty} - {self.post_dep if len(self.post_dep) > 0 else empty} "
 
+    def __repr__(self):
+        return self.to_string()
+
+    def __str__(self):
+        return self.to_string()
+
 
 class Scheduler:
     def __init__(self, filename, dump_to_file=False):
         self.filename = filename
         self.final_schedule = []
+        self.loop_start = 0
+        self.loop_end = 0
 
         self.code = self.__parse_json()
         self.dep_table = self.__compute_deps()
@@ -160,6 +211,8 @@ class Scheduler:
                 loop_end = instr.pc
                 loop_start = int(instr.dest)
         assert loop_start != -1 and loop_end != -1
+        self.loop_start = loop_start
+        self.loop_end = loop_end
 
         # local + post + loop invariant
         # This will introduce wrong dependencies classified as invariants which will have to be fixed when considering
@@ -224,26 +277,34 @@ class Scheduler:
     def __schedule_loop(self):
         pc = 0
         scheduled_slot = [-10 for i in range(len(self.dep_table))]
+        loop_reached = False
+        end_loop_reached = False
         while True:
+            if scheduled_slot.count(-10) == 0:
+                break
             self.final_schedule.append(Bundle(pc))
             for i, instr in enumerate(self.dep_table):
+                if i == self.loop_start and not loop_reached:
+                    if scheduled_slot[:self.loop_start].count(-10) == 0:
+                        loop_reached = True
+                    break
+                if i == self.loop_end and not end_loop_reached:
+                    if scheduled_slot[self.loop_start:self.loop_end].count(-10) == 0:
+                        end_loop_reached = True
+                    if not end_loop_reached: break
+                if scheduled_slot[i] != -10:continue
                 deps = instr.get_all_deps()
                 earliest_time = -10
                 for dep in deps:
                     start_time = scheduled_slot[dep[1]] + self.__get_latency(self.dep_table[dep[1]].opcode)
                     if start_time > earliest_time:
                         earliest_time = start_time
-                if earliest_time <= pc and :
-
-
-
-
-
-
-
-
-
+                if earliest_time <= pc:
+                    res = self.final_schedule[pc].schedule_instr(instr)
+                    if res:
+                        scheduled_slot[i] = pc
             pc += 1
+        print(self.final_schedule)
 
 
 
