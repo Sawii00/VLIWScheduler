@@ -56,7 +56,7 @@ class DepTableEntry:
 
     def to_string(self):
         empty = "__________"
-        return f"{self.id} ({self.opcode}) - {self.destination if not self.opcode == 'st' else '___'} - {self.local_dep if len(self.local_dep) > 0 else empty}  - {self.interloop_dep if len(self.interloop_dep) > 0 else empty} - {self.invariant_dep if len(self.invariant_dep) > 0 else empty} - {self.post_dep if len(self.post_dep) > 0 else empty} "
+        return f"{self.id} ({self.opcode}) - {self.destination if not self.opcode in ['st', 'loop', 'loop.pip'] else '___'} - {self.local_dep if len(self.local_dep) > 0 else empty}  - {self.interloop_dep if len(self.interloop_dep) > 0 else empty} - {self.invariant_dep if len(self.invariant_dep) > 0 else empty} - {self.post_dep if len(self.post_dep) > 0 else empty} "
 
 
 class Scheduler:
@@ -79,7 +79,7 @@ class Scheduler:
         return 3 if opcode == "mulu" else 1
 
     '''
-        st has the source value as destination register
+        st has the immediate as destination register
     '''
     def __parse_json(self):
         output = []
@@ -160,7 +160,31 @@ class Scheduler:
             dep_table.append(dep)
 
         # Inter-loop Dependencies
+        for i in range(loop_start, loop_end):
+            instr = self.code[i]
+            found_1 = False
+            found_2 = False
+            deps = []
+            for j in range(loop_end, i - 1, -1):
+                entry = dep_table[j]
+                if entry.opcode == "st": continue
+                if not found_1 and entry.destination == instr.op1:
+                    deps.append((instr.op1, entry.id))
+                    found_1 = True
+                if not found_2 and entry.destination == instr.op2:
+                    deps.append((instr.op2, entry.id))
+                    found_2 = True
+                if found_1 and found_2: break
 
+            for op_dep in deps:
+                dep_table[i].add_interloop_dep(*op_dep)
+                remove_obj = []
+                for inv_dep in dep_table[i].invariant_dep:
+                    if inv_dep[0] == op_dep[0]:
+                        dep_table[i].add_interloop_dep(*inv_dep)
+                        remove_obj.append(inv_dep)
+                for obj in remove_obj:
+                    dep_table[i].invariant_dep.remove(obj)
 
         return dep_table
 
