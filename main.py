@@ -1,5 +1,5 @@
 from scheduler import Scheduler
 
-sched = Scheduler("handout_4.json")
+sched = Scheduler("handout.json")
 
-#TODO: DEBUG HANDOUT_3
+#TODO: see what happens if you have invariant + local in post-loop

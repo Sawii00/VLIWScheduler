@@ -10,6 +10,14 @@ class Bundle:
         self.mem = None
         self.br = None
 
+    def find(self, pc):
+        if self.alu0 is not None and self.alu0.pc == pc:return self.alu0
+        if self.alu1 is not None and self.alu1.pc == pc:return self.alu1
+        if self.mul is not None and self.mul.pc == pc:return self.mul
+        if self.mem is not None and self.mem.pc == pc:return self.mem
+        if self.br is not None and self.br.pc == pc:return self.br
+        return None
+
     def set_alu0(self, alu0):
         assert alu0.opcode in ["add", "sub", "mov"] or alu0.opcode == "nop"
         self.alu0 = alu0
@@ -52,11 +60,11 @@ class Bundle:
         return False
 
     def to_string(self):
-        alu0 = f"{chr(ord('A') + self.alu0.id)} ({self.alu0.opcode})" if self.alu0 is not None else None
-        alu1 = f"{chr(ord('A') + self.alu1.id)} ({self.alu1.opcode})" if self.alu1 is not None else None
-        mul = f"{chr(ord('A') + self.mul.id)} ({self.mul.opcode})" if self.mul is not None else None
-        mem = f"{chr(ord('A') + self.mem.id)} ({self.mem.opcode})" if self.mem is not None else None
-        br = f"{chr(ord('A') + self.br.id)} ({self.br.opcode})" if self.br is not None else None
+        alu0 = f"{chr(ord('A') + self.alu0.pc)} ({self.alu0.opcode} {self.alu0.dest}, {self.alu0.op1}, {self.alu0.op2})" if self.alu0 is not None else None
+        alu1 = f"{chr(ord('A') + self.alu1.pc)} ({self.alu1.opcode} {self.alu1.dest}, {self.alu1.op1}, {self.alu1.op2})" if self.alu1 is not None else None
+        mul = f"{chr(ord('A') + self.mul.pc)} ({self.mul.opcode} {self.mul.dest}, {self.mul.op1}, {self.mul.op2})" if self.mul is not None else None
+        mem = f"{chr(ord('A') + self.mem.pc)} ({self.mem.opcode} {self.mem.dest}, {self.mem.op1}, {self.mem.op2})" if self.mem is not None else None
+        br = f"{chr(ord('A') + self.br.pc)} ({self.br.opcode})" if self.br is not None else None
         return f"Bundle({self.pc}): {alu0} | {alu1} | {mul} | {mem} | {br}\n"
 
     def __repr__(self):
@@ -135,6 +143,7 @@ class Scheduler:
         self.final_schedule = []
         self.loop_start = 0
         self.loop_end = 0
+        self.scheduled_slot = []
 
         self.code = self.__parse_json()
         self.dep_table = self.__compute_deps()
@@ -143,9 +152,10 @@ class Scheduler:
         # WE ARE NOT CHECKING THAT A LOOP EVEN EXISTS IN CODE (WE ASSUME IT IS THERE)
         if self.__is_loop_program():
             self.__schedule_loop()
+            self.__register_rename_loop()
         else:
             self.__schedule_loop_pip()
-        self.__register_rename()
+            self.__register_rename_loop_pip()
 
         if dump_to_file:
             self.dump_json(f"{filename[:filename.find('.json')]}_out.json")
@@ -306,8 +316,8 @@ class Scheduler:
             self.ii += 1
         # Swapping the loop position
         if to_be_fixed:
-            self.final_schedule[self.loop_end].set_br(self.final_schedule[self.loop_end - delta].br)
-            self.final_schedule[self.loop_end - delta].br = None
+            self.final_schedule[scheduled_slots[self.loop_end]].set_br(self.final_schedule[scheduled_slots[self.loop_end] - delta].br)
+            self.final_schedule[scheduled_slots[self.loop_end] - delta].br = None
             for i in range(len(self.final_schedule)):
                 self.final_schedule[i].pc = i
 
@@ -335,7 +345,7 @@ class Scheduler:
                     if start_time > earliest_time:
                         earliest_time = start_time
                 if earliest_time <= pc:
-                    res = self.final_schedule[pc].schedule_instr(instr)
+                    res = self.final_schedule[pc].schedule_instr(self.code[instr.id])
                     if res:
                         scheduled_slot[i] = pc
                 if i == self.loop_end: break  # to split bb2 from bb1
@@ -343,12 +353,70 @@ class Scheduler:
         self.ii = scheduled_slot[self.loop_end] - scheduled_slot[self.loop_start] + 1
 
         self.__fix_schedule(scheduled_slot)
+        self.scheduled_slot = scheduled_slot
         # TODO: update loop target
+
+    def __register_rename_loop(self):
+        # Destination Register Allocation
+        curr_reg = 1
+        for bundle in self.final_schedule:
+            for instr in [bundle.alu0, bundle.alu1, bundle.mul, bundle.mem]:
+                if instr is not None and instr.dest not in ["LC", "EC"] and instr.opcode != "st":
+                    instr.dest = f"x{curr_reg}"
+                    curr_reg += 1
+        # Operand Linking
+        interloop_missing = set()
+        for bundle in self.final_schedule:
+            for instr in [bundle.alu0, bundle.alu1, bundle.mul, bundle.mem]:
+                if instr is not None:
+                    for dep in self.dep_table[instr.pc].local_dep + self.dep_table[instr.pc].invariant_dep + self.dep_table[instr.pc].post_dep:
+                        if instr.op1 == dep[0]:
+                            instr.op1 = self.final_schedule[self.scheduled_slot[dep[1]]].find(dep[1]).dest
+                        if instr.op2 == dep[0]:
+                            instr.op2 = self.final_schedule[self.scheduled_slot[dep[1]]].find(dep[1]).dest
+                    dep = 0
+                    if len(self.dep_table[instr.pc].interloop_dep) == 2:
+                        deps_sorted = sorted(self.dep_table[instr.pc].interloop_dep, key=lambda x: x[1])
+                        dep = deps_sorted[0]
+                        interloop_missing.add((deps_sorted[1][1], self.final_schedule[self.scheduled_slot[deps_sorted[1][1]]].find(deps_sorted[1][1]).dest, self.final_schedule[self.scheduled_slot[dep[1]]].find(dep[1]).dest))
+                    elif len(self.dep_table[instr.pc].interloop_dep) == 1:
+                        dep = self.dep_table[instr.pc].interloop_dep[0]
+                    else:
+                        continue
+                    if instr.op1 == dep[0]:
+                        instr.op1 = self.final_schedule[self.scheduled_slot[dep[1]]].find(dep[1]).dest
+                    if instr.op2 == dep[0]:
+                        instr.op2 = self.final_schedule[self.scheduled_slot[dep[1]]].find(dep[1]).dest
+        # Interloop Handling
+        print(interloop_missing)
+        increments = 0
+        for dep in interloop_missing:
+            curr_pos = self.scheduled_slot[self.loop_end]
+            start_time = self.scheduled_slot[dep[0]] + self.__get_latency(self.dep_table[dep[0]].opcode)
+            while True:
+                if start_time <= curr_pos:
+                    res = self.final_schedule[curr_pos].schedule_instr(Instruction(ord("Z") - ord("A"), "mov", dep[2], dep[1], None))
+                    if res:
+                        break
+                else:
+                    self.final_schedule.insert(self.scheduled_slot[self.loop_end] + 1, Bundle(self.scheduled_slot[self.loop_end] + 1))
+                    for j in range(len(self.scheduled_slot)):
+                        if self.scheduled_slot[j] > self.scheduled_slot[self.loop_end]: self.scheduled_slot[j] += 1
+                    increments += 1
+                    self.ii += 1
+                    self.final_schedule[self.scheduled_slot[self.loop_end] + increments].set_br(self.final_schedule[self.scheduled_slot[self.loop_end] + increments - 1].br)
+                    self.final_schedule[self.scheduled_slot[self.loop_end] + increments - 1].br = None
+                    for i in range(len(self.final_schedule)):
+                        self.final_schedule[i].pc = i
+                curr_pos += 1
+        # to change the perceived loop position at the end because otherwise mov instructions will try to schedule from
+        # the current loop position that can be already moved down if previous moves caused it to move
+        self.scheduled_slot[self.loop_end] += increments
 
     def __schedule_loop_pip(self):
         pass
 
-    def __register_rename(self):
+    def __register_rename_loop_pip(self):
         pass
 
     def get_schedule(self):
