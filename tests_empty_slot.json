@@ -1,0 +1,13 @@
+[
+  "mov LC, 10",
+  "mov x2, 0x1000",
+  "mov x3, 1",
+  "mov x4, 25",
+  "ld x5, 0(x4)",
+  "mulu x6, x6, x5",
+  "st x0, 3(x2)",
+  "addi x2, x2, 1",
+  "loop 4",
+  "st x3, 0(x6)",
+  "addi x16, x3, 3"
+]
