@@ -1,5 +1,7 @@
 from scheduler import Scheduler
 
-sched = Scheduler("handout_4.json")
+sched = Scheduler("tests_3.json")
+#sched_pip = Scheduler("handout.json", pip=True)
 
-#TODO: DEBUG HANDOUT_3
+
+# Cannot use LC or EC or any predicate as operand
