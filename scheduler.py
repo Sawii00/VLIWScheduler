@@ -1,4 +1,5 @@
 import json
+from json_encoder import CustomEncoder
 import math
 
 
@@ -60,6 +61,21 @@ class Bundle:
                 return 5
         return 0
 
+    def _set_by_id(self, id, instr):
+        if id == 1:
+            self.alu0 = instr
+        elif id == 2:
+            self.alu1 = instr
+        elif id == 3:
+            self.mul = instr
+        elif id == 4:
+            self.mem = instr
+        elif id == 5:
+            self.br = instr
+        else:
+            raise Exception("Invalid Functional Unit id")
+
+
     def schedule_instr_by_id(self, id, instr):
         if id == 1:
             self.set_alu0(instr)
@@ -113,16 +129,19 @@ class Instruction:
         self.predicate = predicate
 
     def to_string(self):
-        if self.opcode in ["ld", "st"]:
-            return f"({self.predicate}) {self.opcode} {self.dest}, {self.op2}({self.op1})"
+        base = f"({self.predicate}) " if self.predicate is not None else ""
+        if self.opcode  == "ld":
+            return f"{base}{self.opcode} {self.dest}, {self.op2}({self.op1})"
+        elif self.opcode == "st":
+            return f"{base}{self.opcode} {self.op1}, {self.dest}({self.op2})"
         elif self.opcode in ["loop", "loop.pip"]:
             return f"{self.opcode} {self.dest}"
         elif self.opcode == "nop":
             return "nop"
         elif self.opcode == "mov":
-            return f"({self.predicate}) {self.opcode} {self.dest}, {self.op1}"
+            return f"{base}{self.opcode} {self.dest}, {self.op1}"
         else:
-            return f"({self.predicate}) {self.opcode} {self.dest}, {self.op1}, {self.op2}"
+            return f"{base}{self.opcode} {self.dest}, {self.op1}, {self.op2}"
 
     def get_dest(self):
         if self.opcode in ["add", "addi", "mulu", "mov", "sub", "ld"] and self.dest not in ["LC", "EC"]:
@@ -180,6 +199,7 @@ class Scheduler:
         self.loop_start = 0
         self.loop_end = 0
         self.scheduled_slot = []
+        self.n_stages = 0
 
         self.code = self.__parse_json()
         self.dep_table = self.__compute_deps()
@@ -212,9 +232,7 @@ class Scheduler:
             for PC, instruction in enumerate(json.load(file)):
                 opcode = instruction.split(" ")[0].strip()
                 registers = instruction[instruction.find(" "):].split(",")
-                if opcode == "addi":
-                    opcode = "add"
-                elif opcode == "nop":
+                if opcode == "nop":
                     output.append(Instruction(PC, opcode, None, None, None))
                     continue
                 elif opcode == "ld":
@@ -665,6 +683,14 @@ class Scheduler:
         res = self.final_schedule[-1].schedule_instr(self.code[self.loop_end])
         if res:
             scheduled_slot[self.loop_end] = pc
+            for j, prev_bundle in enumerate(self.final_schedule[self.__get_pc_start_loop():pc]):
+                if j % curr_ii == (pc - self.__get_pc_start_loop()) % curr_ii: prev_bundle.schedule_instr_by_id(res,
+                                                                                                                Instruction(
+                                                                                                                    -1,
+                                                                                                                    "RES",
+                                                                                                                    None,
+                                                                                                                    None,
+                                                                                                                    None))
         else:
             raise Exception("Could not schedule loop.pip")
 
@@ -702,7 +728,7 @@ class Scheduler:
 
     def __register_rename_loop_pip(self):
         # NOTE: assumes that loop is scheduled in last instruction
-        n_stages = (self.scheduled_slot[self.loop_end] - self.__get_pc_start_loop() + 1) // self.ii
+        self.n_stages = (self.scheduled_slot[self.loop_end] - self.__get_pc_start_loop() + 1) // self.ii
 
         # First phase (loop rotating destinations)
         curr_reg = 32
@@ -710,7 +736,7 @@ class Scheduler:
             for instr in [bundle.alu0, bundle.alu1, bundle.mul, bundle.mem]:
                 if instr is not None and instr.opcode not in ["st", "nop", "RES"]:
                     instr.dest = f"x{curr_reg}"
-                    curr_reg += n_stages + 1
+                    curr_reg += self.n_stages + 1
 
         # Second phase (invariants)
         invariant_set = set()
@@ -763,7 +789,16 @@ class Scheduler:
             if found_dep != -1:
                 instr.dest = f"x{int(self.final_schedule[self.scheduled_slot[found_dep]].find(found_dep).dest[1:]) + 1}"
 
-        # TODO: local dep within BB0 or BB2
+        # local dep within BB0 or BB2
+        # TODO: test this
+        for deps in self.dep_table[:self.loop_start]:
+            for dep in deps.local_dep:
+                self.final_schedule[self.scheduled_slot[dep[1]]].find(dep[1]).dest = f"x{curr_inv_reg}"
+                if self.final_schedule[self.scheduled_slot[deps.id]].find(deps.id).op1 == dep[0]:
+                    self.final_schedule[self.scheduled_slot[deps.id]].find(deps.id).op1 = f"x{curr_inv_reg}"
+                if self.final_schedule[self.scheduled_slot[deps.id]].find(deps.id).op2 == dep[0]:
+                    self.final_schedule[self.scheduled_slot[deps.id]].find(deps.id).op2 = f"x{curr_inv_reg}"
+                curr_inv_reg += 1
 
         # post dep in BB2
         for instr in self.dep_table[self.loop_end+1:]:
@@ -781,18 +816,82 @@ class Scheduler:
             for instr in [bundle.alu0, bundle.alu1, bundle.mul, bundle.mem]:
                 if instr is not None:
                     for dep in self.dep_table[instr.pc].invariant_dep:
-                        dest = self.final_schedule[self.scheduled_slot[dep[1]]].dest
+                        dest = self.final_schedule[self.scheduled_slot[dep[1]]].find(dep[1]).dest
                         if instr.op1 == dep[0]:
                             instr.op1 = dest
                         if instr.op2 == dep[0]:
                             instr.op2 = dest
 
     def __prepare_loop_pip(self):
-        pass
+        end_loop = self.scheduled_slot[self.loop_end]
+        n_stages_to_drop = end_loop - self.__get_pc_start_loop() - self.ii + 1
+        for bundle in self.final_schedule[self.__get_pc_start_loop() + self.ii: end_loop + 1]:
+            for instr in [(1, bundle.alu0), (2, bundle.alu1), (3, bundle.mul), (4, bundle.mem), (5, bundle.br)]:
+                if instr[1] is not None and instr[1].opcode != "RES":
+                    slot = self.__get_pc_start_loop() + (bundle.pc - self.__get_pc_start_loop()) % self.ii
+                    assert self.final_schedule[slot].get_slot_by_id(instr[0]).opcode == "RES"
+                    self.final_schedule[slot]._set_by_id(instr[0], None)
+                    instr[1].predicate = f"p{32 + self.__stage_n(instr[1].pc)}"
+                    self.final_schedule[slot].schedule_instr_by_id(instr[0], instr[1])
+                    self.scheduled_slot[instr[1].pc] = slot
+
+        # Removing RES slots and assigning predicates
+        for bundle in self.final_schedule[self.__get_pc_start_loop():self.scheduled_slot[self.loop_end] + 1]:
+            for instr in [(1, bundle.alu0), (2, bundle.alu1), (3, bundle.mul), (4, bundle.mem), (5, bundle.br)]:
+                if instr[1] is not None:
+                    if instr[1].opcode == "RES":
+                        bundle._set_by_id(instr[0], None)
+                        break
+                    if instr[1].predicate is None:
+                        instr[1].predicate = "p32"
+
+        # Dropping Stages
+        for i in range(n_stages_to_drop):
+            self.final_schedule.pop(self.__get_pc_start_loop() + self.ii)
+
+        # Fix post-loop schedule_slot
+        for i in range(len(self.scheduled_slot)):
+            if self.scheduled_slot[i] > end_loop: self.scheduled_slot[i] -= n_stages_to_drop
+
+        # Adding MOVs for predicate and EC
+        stages_added = 0
+        prev_loop_pos = self.__get_pc_start_loop()
+        res = self.final_schedule[self.__get_pc_start_loop() - 1].schedule_instr(Instruction(-1, "mov", "p32", "true", None))
+        if not res:
+            self.final_schedule.insert(self.__get_pc_start_loop(), Bundle(-1))
+            stages_added += 1
+            assert self.final_schedule[self.__get_pc_start_loop()].schedule_instr(Instruction(-1, "mov", "p32", "true", None))
+
+        res = self.final_schedule[self.__get_pc_start_loop() + stages_added - 1].schedule_instr(Instruction(-1, "mov", "EC", f"{self.n_stages - 1}", None))
+        if not res:
+            self.final_schedule.insert(self.__get_pc_start_loop() + stages_added, Bundle(-1))
+            stages_added += 1
+            assert self.final_schedule[self.__get_pc_start_loop() + stages_added].schedule_instr(
+                Instruction(-1, "mov", "EC", f"{self.n_stages - 1}", None))
+
+        for i in range(len(self.scheduled_slot)):
+            if self.scheduled_slot[i] >= prev_loop_pos: self.scheduled_slot[i] += stages_added
+
+        # Fix bundle pc
+        for pc, bundle in enumerate(self.final_schedule):
+            bundle.pc = pc
+
+        # Set loop target
+        self.final_schedule[self.scheduled_slot[self.loop_end]].find(self.loop_end).dest = self.__get_pc_start_loop()
+        self.final_schedule[self.scheduled_slot[self.loop_end]].find(self.loop_end).opcode = "loop.pip"
 
     def get_schedule(self):
-        return self.final_schedule
+        res = []
+        for bundle in self.final_schedule:
+            bnd = []
+            for instr in [bundle.alu0, bundle.alu1, bundle.mul, bundle.mem, bundle.br]:
+                if instr is not None:
+                    bnd.append(instr.to_string())
+                else:
+                    bnd.append("nop")
+            res.append(bnd)
+        return res
 
     def dump_json(self, filename):
         with open(filename, "w") as file:
-            json.dump(self.final_schedule, file, indent=2)
+            json.dump(self.get_schedule(), file, indent=2, cls=CustomEncoder)
