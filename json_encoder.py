@@ -7,7 +7,7 @@ class CustomEncoder(json.JSONEncoder):
         self.indentation_level = 0
 
     def encode(self, o):
-        if isinstance(o, (list, tuple)):
+        if isinstance(o, (list)):
             if self._list_single_line(o):
                 return "[" + ", ".join(json.dumps(el) for el in o) + "]"
             else:

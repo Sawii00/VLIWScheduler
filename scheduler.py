@@ -202,10 +202,11 @@ class Scheduler:
         self.n_stages = 0
 
         self.code = self.__parse_json()
+
         self.dep_table = self.__compute_deps()
-        for dep in self.dep_table:
-            print(dep.to_string())
-        # WE ARE NOT CHECKING THAT A LOOP EVEN EXISTS IN CODE (WE ASSUME IT IS THERE)
+        #for dep in self.dep_table:
+            #print(dep.to_string())
+
         if not pip:
             self.__schedule_loop()
             self.__register_rename_loop()
@@ -217,8 +218,9 @@ class Scheduler:
         if dump_to_file:
             self.dump_json(f"{filename[:filename.find('.json')]}_out.json")
         else:
-            print(self.get_schedule())
-            print(self.ii)
+            pass
+            #print(self.get_schedule())
+            #print(self.ii)
 
     def __get_latency(self, opcode):
         return 3 if opcode == "mulu" else 1
@@ -228,38 +230,45 @@ class Scheduler:
     '''
     def __parse_json(self):
         output = []
-        with open(self.filename, "r") as file:
-            for PC, instruction in enumerate(json.load(file)):
-                opcode = instruction.split(" ")[0].strip()
-                registers = instruction[instruction.find(" "):].split(",")
-                if opcode == "nop":
-                    output.append(Instruction(PC, opcode, None, None, None))
-                    continue
-                elif opcode == "ld":
-                    destination_register = (registers[0].strip())
-                    operand_1 = registers[1].strip()[registers[1].find("("): registers[1].find(")") - 1]
-                    operand_2 = (registers[1].strip().split("(")[0])
-                    output.append(Instruction(PC, opcode, destination_register, operand_1, operand_2))
-                    continue
-                elif opcode == "st":
-                    operand_1 = (registers[0].strip())
-                    operand_2 = registers[1].strip()[registers[1].find("("): registers[1].find(")") - 1]
-                    destination_register = (registers[1].strip().split("(")[0])
-                    output.append(Instruction(PC, opcode, destination_register, operand_1, operand_2))
-                    continue
-                elif opcode in ["loop", "loop.pip"]:
-                    output.append(Instruction(PC, opcode, registers[0].strip(), None, None))
-                    continue
-                elif opcode == "mov":
-                    destination_register = (registers[0].strip())
-                    operand_1 = registers[1].strip()
-                    output.append(Instruction(PC, opcode, destination_register, operand_1, None))
-                    continue
+        #TODO: remove this
+        if isinstance(self.filename, str):
+            file = open(self.filename, "r")
+            program = json.load(file)
+        else:
+            file = json.dumps(self.filename)
+            program = json.loads(file)
 
+        for PC, instruction in enumerate(program):
+            opcode = instruction.split(" ")[0].strip()
+            registers = instruction[instruction.find(" "):].split(",")
+            if opcode == "nop":
+                output.append(Instruction(PC, opcode, None, None, None))
+                continue
+            elif opcode == "ld":
                 destination_register = (registers[0].strip())
-                operand_1 = (registers[1].strip())
-                operand_2 = (registers[2].strip())
+                operand_1 = registers[1].strip()[registers[1].find("("): registers[1].find(")") - 1]
+                operand_2 = (registers[1].strip().split("(")[0])
                 output.append(Instruction(PC, opcode, destination_register, operand_1, operand_2))
+                continue
+            elif opcode == "st":
+                operand_1 = (registers[0].strip())
+                operand_2 = registers[1].strip()[registers[1].find("("): registers[1].find(")") - 1]
+                destination_register = (registers[1].strip().split("(")[0])
+                output.append(Instruction(PC, opcode, destination_register, operand_1, operand_2))
+                continue
+            elif opcode in ["loop", "loop.pip"]:
+                output.append(Instruction(PC, opcode, registers[0].strip(), None, None))
+                continue
+            elif opcode == "mov":
+                destination_register = (registers[0].strip())
+                operand_1 = registers[1].strip()
+                output.append(Instruction(PC, opcode, destination_register, operand_1, None))
+                continue
+
+            destination_register = (registers[0].strip())
+            operand_1 = (registers[1].strip())
+            operand_2 = (registers[2].strip())
+            output.append(Instruction(PC, opcode, destination_register, operand_1, operand_2))
         return output
 
     def __compute_deps(self):
@@ -284,7 +293,7 @@ class Scheduler:
             for i in range(len(dep_table) - 1, -1, -1):
                 entry = dep_table[i]
                 # if entry.id >= instr.pc:break
-                if entry.opcode == "st": continue
+                if entry.opcode in["st", "loop"]: continue
                 if not found_1 and entry.destination == instr.op1:
                     deps.add((instr.op1, entry.id))
                     found_1 = True
@@ -319,7 +328,7 @@ class Scheduler:
             deps = set()
             for j in range(loop_end, i - 1, -1):
                 entry = dep_table[j]
-                if entry.opcode == "st": continue
+                if entry.opcode in["st", "loop"]: continue
                 if not found_1 and entry.destination == instr.op1:
                     deps.add((instr.op1, entry.id))
                     found_1 = True
@@ -539,7 +548,7 @@ class Scheduler:
                         if instr.op2 == dep[0]:
                             instr.op2 = self.final_schedule[self.scheduled_slot[dep[1]]].find(dep[1]).dest
         # Interloop Handling
-        print(interloop_missing)
+        #print(interloop_missing)
         increments = 0
         for dep in sorted(interloop_missing, key=lambda x: self.scheduled_slot[x[0]] + self.__get_latency(self.dep_table[x[0]].opcode)):
             curr_pos = self.scheduled_slot[self.loop_end] + increments
@@ -574,7 +583,6 @@ class Scheduler:
                     if instr.op1 == dep[1]: instr.op1 = dep[2]
                     if instr.op2 == dep[1]: instr.op2 = dep[2]
                     '''
-
         self.final_schedule[self.scheduled_slot[self.loop_end]].find(self.loop_end).dest = self.__get_pc_start_loop()
 
     def __get_pc_start_loop(self):
@@ -769,7 +777,7 @@ class Scheduler:
                         if instr.op2 == dep[0]:
                             instr.op2 = dest
                     for dep in deps.interloop_dep:
-                        dest = f"x{int(self.final_schedule[self.scheduled_slot[dep[1]]].find(dep[1]).dest[1:]) + self.__stage_n(instr.pc) + 1}"
+                        dest = f"x{int(self.final_schedule[self.scheduled_slot[dep[1]]].find(dep[1]).dest[1:]) + self.__stage_n(instr.pc) - self.__stage_n(dep[1]) + 1}"
                         if instr.op1 == dep[0]:
                             instr.op1 = dest
                         if instr.op2 == dep[0]:
@@ -891,6 +899,9 @@ class Scheduler:
                     bnd.append("nop")
             res.append(bnd)
         return res
+    
+    def get_schedule_dump(self):
+        return json.dumps(self.get_schedule(), indent=2, cls=CustomEncoder)
 
     def dump_json(self, filename):
         with open(filename, "w") as file:

@@ -2,3 +2,10 @@
 __pycache__/
 *.png
 tests/
+errors/
+Bundle.py
+DepTableElem.py
+*.json
+main_gianlu.py
+Instruction.py
+VLIWCompiler.py
