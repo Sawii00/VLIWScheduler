@@ -74,8 +74,10 @@ class Fuzzer:
         tests = self.generate_tests(n, pre_length, loop_length, post_length)
         errors = []
         for test in tests:
+            with open(f"errors/test.json", "w") as file:
+                json.dump(test, file, indent=2)
             gianlu = main_gianlu.do_stuff(json.dumps(test))
-            for i, pip in enumerate([False]):#, True]):
+            for i, pip in enumerate([True], 1):#, True]):
                 sim1 = sawo.Scheduler(test, pip)
                 res2 = vliw470.simulate(json.loads(gianlu[i]))
                 res1 = vliw470.simulate(json.loads(sim1.get_schedule_dump()))
@@ -86,8 +88,9 @@ class Fuzzer:
 
 
 fuzzer = Fuzzer()
-errors = fuzzer.test(10)
+errors = fuzzer.test(1000)
 
+'''
 for i, error in enumerate(errors):
     with open(f"errors/code_error_{i}_1.json", "w") as file:
         json.dump(error[0], file, indent=2)
@@ -95,3 +98,4 @@ for i, error in enumerate(errors):
         json.dump(error[1], file, indent=2, cls=CustomEncoder)
     with open(f"errors/error_{i}_2.json", "w") as file:
         json.dump(error[2], file, indent=2, cls=CustomEncoder)
+'''
