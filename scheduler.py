@@ -21,7 +21,7 @@ class Bundle:
         return None
 
     def set_alu0(self, alu0):
-        assert alu0.opcode in ["add", "addi", "sub", "mov", "nop", "RES"]  and self.alu0 is None
+        assert alu0.opcode in ["add", "addi", "sub", "mov", "nop", "RES"] and self.alu0 is None
         self.alu0 = alu0
 
     def set_alu1(self, alu1):
@@ -39,6 +39,13 @@ class Bundle:
     def set_br(self, br):
         assert br.opcode in ["loop", "loop.pip", "nop", "RES"] and self.br is None
         self.br = br
+
+    def get_id_by_instr(self, instr):
+        if self.alu0 == instr:return 1
+        if self.alu1 == instr:return 2
+        if self.mul == instr:return 3
+        if self.mem == instr:return 4
+        if self.br == instr:return 5
 
     def schedule_instr(self, instr):
         if instr.opcode in ["add", "addi", "sub", "mov"]:
@@ -74,7 +81,6 @@ class Bundle:
             self.br = instr
         else:
             raise Exception("Invalid Functional Unit id")
-
 
     def schedule_instr_by_id(self, id, instr):
         if id == 1:
@@ -130,7 +136,7 @@ class Instruction:
 
     def to_string(self):
         base = f"({self.predicate}) " if self.predicate is not None else ""
-        if self.opcode  == "ld":
+        if self.opcode == "ld":
             return f"{base}{self.opcode} {self.dest}, {self.op2}({self.op1})"
         elif self.opcode == "st":
             return f"{base}{self.opcode} {self.op1}, {self.dest}({self.op2})"
@@ -193,7 +199,7 @@ class DepTableEntry:
 
 
 class Scheduler:
-    def __init__(self, filename, pip = False, dump_to_file=False):
+    def __init__(self, filename, pip=False, dump_to_file=False):
         self.filename = filename
         self.final_schedule = []
         self.loop_start = 0
@@ -220,7 +226,7 @@ class Scheduler:
         else:
             pass
             #print(self.get_schedule_dump())
-            #print(self.ii)
+                #print(self.ii)
 
     def __get_latency(self, opcode):
         return 3 if opcode == "mulu" else 1
@@ -228,9 +234,10 @@ class Scheduler:
     '''
         st has the immediate as destination register
     '''
+
     def __parse_json(self):
         output = []
-        #TODO: remove this
+        # TODO: remove this
         if isinstance(self.filename, str):
             file = open(self.filename, "r")
             program = json.load(file)
@@ -293,7 +300,7 @@ class Scheduler:
             for i in range(len(dep_table) - 1, -1, -1):
                 entry = dep_table[i]
                 # if entry.id >= instr.pc:break
-                if entry.opcode in["st", "loop"]: continue
+                if entry.opcode in ["st", "loop"]: continue
                 if not found_1 and entry.destination == instr.op1:
                     deps.add((instr.op1, entry.id))
                     found_1 = True
@@ -328,13 +335,14 @@ class Scheduler:
             deps = set()
             for j in range(loop_end, i - 1, -1):
                 entry = dep_table[j]
-                if entry.opcode in["st", "loop"]: continue
-                if not found_1 and entry.destination == instr.op1:
-                    deps.add((instr.op1, entry.id))
-                    found_1 = True
-                if not found_2 and entry.destination == instr.op2:
-                    deps.add((instr.op2, entry.id))
-                    found_2 = True
+                if entry.opcode in ["st", "loop"]: continue
+                if entry.destination not in [dep[0] for dep in dep_table[i].local_dep]:
+                    if not found_1 and entry.destination == instr.op1:
+                        deps.add((instr.op1, entry.id))
+                        found_1 = True
+                    if not found_2 and entry.destination == instr.op2:
+                        deps.add((instr.op2, entry.id))
+                        found_2 = True
                 if found_1 and found_2: break
 
             for op_dep in deps:
@@ -346,15 +354,6 @@ class Scheduler:
                         remove_obj.append(inv_dep)
                 for obj in remove_obj:
                     dep_table[i].invariant_dep.remove(obj)
-
-        for instr in dep_table:
-            to_remove = []
-            for dep in instr.interloop_dep:
-                for dep_loc in instr.local_dep:
-                    if dep_loc[0] == dep[0]:
-                        to_remove.append(dep)
-            for dep in to_remove:
-                instr.interloop_dep.remove(dep)
 
         return dep_table
 
@@ -404,7 +403,7 @@ class Scheduler:
                 if i == self.loop_end and not end_loop_reached:
                     if scheduled_slot[self.loop_start:self.loop_end].count(-10) == 0:
                         end_loop_reached = True
-                    if not end_loop_reached:break
+                    if not end_loop_reached: break
                 deps = instr.get_all_deps()
                 earliest_time = -10
                 unscheduled_prev_dep = False
@@ -413,21 +412,22 @@ class Scheduler:
                         unscheduled_prev_dep = True
                         break
                     start_time = scheduled_slot[dep[1]] + self.__get_latency(self.dep_table[dep[1]].opcode)
-                    if start_time > earliest_time and dep[1] < i:  # Otherwise it can misinterpret interloop if a following instruction is scheduled before this
+                    if start_time > earliest_time and dep[
+                        1] < i:  # Otherwise it can misinterpret interloop if a following instruction is scheduled before this
                         earliest_time = start_time
-                if unscheduled_prev_dep:continue
+                if unscheduled_prev_dep: continue
                 if pc >= earliest_time >= 0 or earliest_time == -10:
                     res = self.final_schedule[pc].schedule_instr(self.code[instr.id])
                     if res:
                         scheduled_slot[i] = pc
                 if i == self.loop_end: break  # to split bb2 from bb1
             pc += 1
-            if end_loop_reached:break
+            if end_loop_reached: break
 
         self.ii = scheduled_slot[self.loop_end] - self.__get_pc_start_loop() + 1
         self.__fix_schedule(scheduled_slot)
         # Post-loop Scheduling to avoid adding empty bundles if the fix_schedule routine has already to add them
-        #TODO: refactor this into a function since also used in schedule pip
+        # TODO: refactor this into a function since also used in schedule pip
         pc = scheduled_slot[self.loop_end] + 1
         while scheduled_slot.count(-10) != 0:
             self.final_schedule.append(Bundle(pc))
@@ -442,7 +442,8 @@ class Scheduler:
                         unscheduled_prev_dep = True
                         break
                     start_time = scheduled_slot[dep[1]] + self.__get_latency(self.dep_table[dep[1]].opcode)
-                    if start_time > earliest_time and dep[1] < i:  # Otherwise it can misinterpret interloop if a following instruction is scheduled before this
+                    if start_time > earliest_time and dep[
+                        1] < i:  # Otherwise it can misinterpret interloop if a following instruction is scheduled before this
                         earliest_time = start_time
                 if unscheduled_prev_dep: continue
                 if pc >= earliest_time >= 0 or earliest_time == -10:
@@ -452,7 +453,6 @@ class Scheduler:
             pc += 1
 
         self.scheduled_slot = scheduled_slot
-
 
     '''
     def __compute_available_regs(self):
@@ -488,7 +488,7 @@ class Scheduler:
                 frequency[3] += 1
             else:
                 raise Exception("Invalid opcode")
-        frequency[0] = math.ceil(frequency[0] / 2) # We got two ALUs
+        frequency[0] = math.ceil(frequency[0] / 2)  # We got two ALUs
         return max(frequency)
 
     def __filter_deps(self, deps):
@@ -565,9 +565,10 @@ class Scheduler:
                             instr.op2 = self.final_schedule[self.scheduled_slot[dep[1]]].find(dep[1]).dest
                             op2 = True
         # Interloop Handling
-        #print(interloop_missing)
+        # print(interloop_missing)
         increments = 0
-        for dep in sorted(interloop_missing, key=lambda x: self.scheduled_slot[x[0]] + self.__get_latency(self.dep_table[x[0]].opcode)):
+        for dep in sorted(interloop_missing,
+                          key=lambda x: self.scheduled_slot[x[0]] + self.__get_latency(self.dep_table[x[0]].opcode)):
             curr_pos = self.scheduled_slot[self.loop_end] + increments
             start_time = self.scheduled_slot[dep[0]] + self.__get_latency(self.dep_table[dep[0]].opcode)
             while True:
@@ -609,7 +610,7 @@ class Scheduler:
                     return bundle.pc
 
     def __schedule_loop_pip(self):
-        #First schedule the pre-loop
+        # First schedule the pre-loop
         pc = 0
         scheduled_slot = [-10 for i in range(len(self.dep_table))]
         while scheduled_slot[:self.loop_start].count(-10) != 0:
@@ -624,7 +625,8 @@ class Scheduler:
                         unscheduled_prev_dep = True
                         break
                     start_time = scheduled_slot[dep[1]] + self.__get_latency(self.dep_table[dep[1]].opcode)
-                    if start_time > earliest_time and dep[1] < i:  # Otherwise it can misinterpret interloop if a following instruction is scheduled before this
+                    if start_time > earliest_time and dep[
+                        1] < i:  # Otherwise it can misinterpret interloop if a following instruction is scheduled before this
                         earliest_time = start_time
                 if unscheduled_prev_dep: continue
                 if pc >= earliest_time >= 0 or earliest_time == -10:
@@ -633,7 +635,7 @@ class Scheduler:
                         scheduled_slot[i] = pc
             pc += 1
 
-        #Schedule the loop
+        # Schedule the loop
         curr_ii = self.__compute_min_ii()
         valid_schedule = False
         while not valid_schedule:
@@ -653,12 +655,14 @@ class Scheduler:
                 # Reserve Slots
                 if self.__get_pc_start_loop() is not None:
                     for slot in range(1, 6):
-                        if self.final_schedule[self.__get_pc_start_loop() + (pc - self.__get_pc_start_loop()) % curr_ii].get_slot_by_id(slot) is not None:
+                        if self.final_schedule[
+                            self.__get_pc_start_loop() + (pc - self.__get_pc_start_loop()) % curr_ii].get_slot_by_id(
+                                slot) is not None:
                             self.final_schedule[-1].schedule_instr_by_id(slot, Instruction(-1, "RES", None, None, None))
                 i = self.loop_start - 1
                 for instr in self.dep_table[self.loop_start:self.loop_end]:
                     i += 1
-                    if scheduled_slot[i] != -10:continue
+                    if scheduled_slot[i] != -10: continue
                     deps = instr.get_all_deps()
                     earliest_time = -10
                     unscheduled_prev_dep = False
@@ -675,21 +679,23 @@ class Scheduler:
                         if res:
                             # Reserving past slots
                             for j, prev_bundle in enumerate(self.final_schedule[self.__get_pc_start_loop():pc]):
-                                if j % curr_ii == (pc - self.__get_pc_start_loop()) % curr_ii: prev_bundle.schedule_instr_by_id(res, Instruction(-1, "RES", None, None, None))
+                                if j % curr_ii == (
+                                        pc - self.__get_pc_start_loop()) % curr_ii: prev_bundle.schedule_instr_by_id(
+                                    res, Instruction(-1, "RES", None, None, None))
                             for dep in instr.interloop_dep:
-                                if scheduled_slot[dep[1]] < 0 and dep[1] != instr.id:continue
+                                if scheduled_slot[dep[1]] < 0 and dep[1] != instr.id: continue
                                 s_p = scheduled_slot[dep[1]] % curr_ii if dep[1] != instr.id else pc % curr_ii
                                 s_c = pc % curr_ii
                                 lambda_p = self.__get_latency(self.code[dep[1]].opcode)
                                 if s_p + lambda_p > s_c + curr_ii:
                                     broken_dependency = True
                                     break
-                            if broken_dependency:break
+                            if broken_dependency: break
                             scheduled_slot[i] = pc
-                    if broken_dependency:break
-                if broken_dependency:break
+                    if broken_dependency: break
+                if broken_dependency: break
                 pc += 1
-            if scheduled_slot[self.loop_start:self.loop_end].count(-10) == 0:break
+            if scheduled_slot[self.loop_start:self.loop_end].count(-10) == 0: break
             curr_ii += 1
 
         # TODO: make this a function
@@ -701,8 +707,8 @@ class Scheduler:
             if self.__get_pc_start_loop() is not None:
                 for slot in range(1, 6):
                     if self.final_schedule[
-                        self.__get_pc_start_loop() + (pc  - 1 - self.__get_pc_start_loop()) % curr_ii].get_slot_by_id(
-                            slot) is not None:
+                        self.__get_pc_start_loop() + (pc - 1 - self.__get_pc_start_loop()) % curr_ii].get_slot_by_id(
+                        slot) is not None:
                         self.final_schedule[-1].schedule_instr_by_id(slot, Instruction(-1, "RES", None, None, None))
 
         # Schedule loop instruction
@@ -725,7 +731,7 @@ class Scheduler:
         self.ii = curr_ii
         self.scheduled_slot = scheduled_slot
 
-        #Schedule the post-loop
+        # Schedule the post-loop
         pc = scheduled_slot[self.loop_end] + 1
         while scheduled_slot.count(-10) != 0:
             self.final_schedule.append(Bundle(pc))
@@ -740,7 +746,8 @@ class Scheduler:
                         unscheduled_prev_dep = True
                         break
                     start_time = scheduled_slot[dep[1]] + self.__get_latency(self.dep_table[dep[1]].opcode)
-                    if start_time > earliest_time and dep[1] < i:  # Otherwise it can misinterpret interloop if a following instruction is scheduled before this
+                    if start_time > earliest_time and dep[
+                        1] < i:  # Otherwise it can misinterpret interloop if a following instruction is scheduled before this
                         earliest_time = start_time
                 if unscheduled_prev_dep: continue
                 if pc >= earliest_time >= 0 or earliest_time == -10:
@@ -751,7 +758,6 @@ class Scheduler:
 
         for i, bundle in enumerate(self.final_schedule):
             bundle.pc = i
-
 
     def __stage_n(self, id):
         res = (self.scheduled_slot[id] - self.__get_pc_start_loop()) // self.ii
@@ -765,19 +771,25 @@ class Scheduler:
 
         # First phase (loop rotating destinations)
         curr_reg = 32
-        for pc, bundle in enumerate(self.final_schedule[self.__get_pc_start_loop():self.scheduled_slot[self.loop_end] + 1], self.__get_pc_start_loop()):
+        for pc, bundle in enumerate(
+                self.final_schedule[self.__get_pc_start_loop():self.scheduled_slot[self.loop_end] + 1],
+                self.__get_pc_start_loop()):
             for instr in [bundle.alu0, bundle.alu1, bundle.mul, bundle.mem]:
                 if instr is not None and instr.opcode not in ["st", "nop", "RES"]:
                     instr.dest = f"x{curr_reg}"
                     curr_reg += self.n_stages + 1
 
         # Second phase (invariants)
-        invariant_set = set()
-        for dep in self.dep_table:
-            for d in dep.invariant_dep:
-                invariant_set.add(d)
+        invariant_set = []
+        for bundle in self.final_schedule:
+            for instr in [bundle.alu0, bundle.alu1, bundle.mul, bundle.mem]:
+                if instr is not None:
+                    for d in self.dep_table[instr.pc].invariant_dep:
+                        if d not in invariant_set:
+                            invariant_set.append(d)
 
         curr_inv_reg = 1
+        invariant_set.sort(key=lambda x: (self.scheduled_slot[x[1]], self.final_schedule[self.scheduled_slot[x[1]]].get_id_by_instr(self.code[x[1]])))
         for dep in invariant_set:
             self.final_schedule[self.scheduled_slot[dep[1]]].find(dep[1]).dest = f"x{curr_inv_reg}"
             curr_inv_reg += 1
@@ -798,7 +810,7 @@ class Scheduler:
                             op1 = True
                         if instr.op2 == dep[0] and not op2:
                             instr.op2 = dest
-                            op2 = True 
+                            op2 = True
                     for dep in deps.local_dep:
                         dest = f"x{int(self.final_schedule[self.scheduled_slot[dep[1]]].find(dep[1]).dest[1:]) + self.__stage_n(instr.pc) - self.__stage_n(dep[1])}"
                         if instr.op1 == dep[0] and not op1:
@@ -823,19 +835,19 @@ class Scheduler:
                             op1 = True
                         if instr.op2 == dep[0] and not op2:
                             instr.op2 = dest
-                            op2 = True 
+                            op2 = True
 
-        # Forth phase (bb0 and bb2 destinations)
+                            # Forth phase (bb0 and bb2 destinations)
 
         # BB0 instr is interloop dep
-        for instr in self.code[:self.loop_start]:
+        for instr in self.dep_table[:self.loop_start]:
             found_dep = -1
             for loop_instr in self.dep_table[self.loop_start:self.loop_end]:
                 for dep in loop_instr.interloop_dep:
-                    if dep[0] == instr.dest and dep[1] != instr.pc:
+                    if dep[0] == instr.destination and dep[1] != instr.id:
                         found_dep = dep[1]
                         break
-                if found_dep != -1:break
+                if found_dep != -1: break
             if found_dep != -1:
                 instr.dest = f"x{int(self.final_schedule[self.scheduled_slot[found_dep]].find(found_dep).dest[1:]) + 1}"
 
@@ -845,17 +857,18 @@ class Scheduler:
             op1 = False
             op2 = False
             for dep in deps.local_dep:
-                self.final_schedule[self.scheduled_slot[dep[1]]].find(dep[1]).dest = f"x{curr_inv_reg}"
+                #self.final_schedule[self.scheduled_slot[dep[1]]].find(dep[1]).dest = f"x{curr_inv_reg}"
+                dest = self.final_schedule[self.scheduled_slot[dep[1]]].find(dep[1]).dest
                 if self.final_schedule[self.scheduled_slot[deps.id]].find(deps.id).op1 == dep[0] and not op1:
-                    self.final_schedule[self.scheduled_slot[deps.id]].find(deps.id).op1 = f"x{curr_inv_reg}"
+                    self.final_schedule[self.scheduled_slot[deps.id]].find(deps.id).op1 = dest
                     op1 = True
                 if self.final_schedule[self.scheduled_slot[deps.id]].find(deps.id).op2 == dep[0] and not op2:
-                    self.final_schedule[self.scheduled_slot[deps.id]].find(deps.id).op2 = f"x{curr_inv_reg}"
+                    self.final_schedule[self.scheduled_slot[deps.id]].find(deps.id).op2 = dest
                     op2 = True
                 curr_inv_reg += 1
 
         # post dep in BB2
-        for deps in self.dep_table[self.loop_end+1:]:
+        for deps in self.dep_table[self.loop_end + 1:]:
             op1 = False
             op2 = False
             for dep in deps.post_dep:
@@ -878,10 +891,10 @@ class Scheduler:
                         dest = self.final_schedule[self.scheduled_slot[dep[1]]].find(dep[1]).dest
                         if instr.op1 == dep[0] and not op2:
                             instr.op1 = dest
-                            op1 = True 
+                            op1 = True
                         if instr.op2 == dep[0] and not op2:
                             instr.op2 = dest
-                            op2 = True 
+                            op2 = True
 
     def __prepare_loop_pip(self):
         end_loop = self.scheduled_slot[self.loop_end]
@@ -917,13 +930,16 @@ class Scheduler:
         # Adding MOVs for predicate and EC
         stages_added = 0
         prev_loop_pos = self.__get_pc_start_loop()
-        res = self.final_schedule[self.__get_pc_start_loop() - 1].schedule_instr(Instruction(-1, "mov", "p32", "true", None))
+        res = self.final_schedule[self.__get_pc_start_loop() - 1].schedule_instr(
+            Instruction(-1, "mov", "p32", "true", None))
         if not res:
             self.final_schedule.insert(self.__get_pc_start_loop(), Bundle(-1))
             stages_added += 1
-            assert self.final_schedule[self.__get_pc_start_loop()].schedule_instr(Instruction(-1, "mov", "p32", "true", None))
+            assert self.final_schedule[self.__get_pc_start_loop()].schedule_instr(
+                Instruction(-1, "mov", "p32", "true", None))
 
-        res = self.final_schedule[self.__get_pc_start_loop() + stages_added - 1].schedule_instr(Instruction(-1, "mov", "EC", f"{self.n_stages - 1}", None))
+        res = self.final_schedule[self.__get_pc_start_loop() + stages_added - 1].schedule_instr(
+            Instruction(-1, "mov", "EC", f"{self.n_stages - 1}", None))
         if not res:
             self.final_schedule.insert(self.__get_pc_start_loop() + stages_added, Bundle(-1))
             stages_added += 1
@@ -952,7 +968,7 @@ class Scheduler:
                     bnd.append("nop")
             res.append(bnd)
         return res
-    
+
     def get_schedule_dump(self):
         return json.dumps(self.get_schedule(), indent=2, cls=CustomEncoder)
 
