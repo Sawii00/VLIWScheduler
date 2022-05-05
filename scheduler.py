@@ -228,7 +228,7 @@ class Scheduler:
             self.dump_json(f"{filename[:filename.find('.json')]}_out.json")
         else:
             pass
-            #print(self.get_schedule_dump())
+            print(self.get_schedule_dump())
                 #print(self.ii)
 
     def __get_latency(self, opcode):
