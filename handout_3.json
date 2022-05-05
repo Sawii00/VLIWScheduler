@@ -1,8 +1,0 @@
-# weird case
-[
-"mov LC, 10",
-"mov x2, 0x1000",
-"mulu x2, x2, x2",
-"loop 2",
-"st x3, 0(x2)"
-]
