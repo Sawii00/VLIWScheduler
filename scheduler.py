@@ -1,3 +1,4 @@
+import copy
 import json
 from json_encoder import CustomEncoder
 import math
@@ -208,6 +209,8 @@ class Scheduler:
         self.n_stages = 0
 
         self.code = self.__parse_json()
+
+        self.code_backup = copy.deepcopy(self.code)
 
         self.dep_table = self.__compute_deps()
         #for dep in self.dep_table:
@@ -695,7 +698,19 @@ class Scheduler:
                     if broken_dependency: break
                 if broken_dependency: break
                 pc += 1
-            if scheduled_slot[self.loop_start:self.loop_end].count(-10) == 0: break
+            if scheduled_slot[self.loop_start:self.loop_end].count(-10) == 0:
+                # We must check all dependencies are respected
+                invalid = False
+                for instr in self.dep_table[self.loop_start:self.loop_end]:
+                    for dep in instr.interloop_dep:
+                        s_p = scheduled_slot[dep[1]]
+                        s_c = scheduled_slot[instr.id]
+                        if s_c + curr_ii < s_p + self.__get_latency(self.code[dep[1]].opcode):
+                            invalid = True
+                            break
+                    if invalid:break
+                if not invalid:
+                    break
             curr_ii += 1
 
         # TODO: make this a function
@@ -887,12 +902,13 @@ class Scheduler:
                 if instr is not None:
                     op1 = False
                     op2 = False
+                    orig_instr = self.code_backup[instr.pc]
                     for dep in self.dep_table[instr.pc].invariant_dep:
                         dest = self.final_schedule[self.scheduled_slot[dep[1]]].find(dep[1]).dest
-                        if instr.op1 == dep[0] and not op2:
+                        if instr.op1 == dep[0] and not op1 and instr.op1 == orig_instr.op1:
                             instr.op1 = dest
                             op1 = True
-                        if instr.op2 == dep[0] and not op2:
+                        if instr.op2 == dep[0] and not op2 and instr.op2 == orig_instr.op2:
                             instr.op2 = dest
                             op2 = True
 
