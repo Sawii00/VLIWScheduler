@@ -228,7 +228,7 @@ class Scheduler:
             self.dump_json(f"{filename[:filename.find('.json')]}_out.json")
         else:
             pass
-            print(self.get_schedule_dump())
+            #print(self.get_schedule_dump())
                 #print(self.ii)
 
     def __get_latency(self, opcode):
@@ -687,8 +687,10 @@ class Scheduler:
                                     res, Instruction(-1, "RES", None, None, None))
                             for dep in instr.interloop_dep:
                                 if scheduled_slot[dep[1]] < 0 and dep[1] != instr.id: continue
-                                s_p = scheduled_slot[dep[1]] % curr_ii if dep[1] != instr.id else pc % curr_ii
-                                s_c = pc % curr_ii
+                                #s_p = scheduled_slot[dep[1]] % curr_ii if dep[1] != instr.id else pc % curr_ii
+                                s_p = scheduled_slot[dep[1]] if dep[1] != instr.id else pc
+                                #s_c = pc % curr_ii
+                                s_c = pc
                                 lambda_p = self.__get_latency(self.code[dep[1]].opcode)
                                 if s_p + lambda_p > s_c + curr_ii:
                                     broken_dependency = True
@@ -867,20 +869,37 @@ class Scheduler:
                 instr.dest = f"x{int(self.final_schedule[self.scheduled_slot[found_dep]].find(found_dep).dest[1:]) + 1}"
 
         # local dep within BB0 or BB2
-        # TODO: test this
         for deps in self.dep_table[:self.loop_start]:
             op1 = False
             op2 = False
             for dep in deps.local_dep:
-                #self.final_schedule[self.scheduled_slot[dep[1]]].find(dep[1]).dest = f"x{curr_inv_reg}"
                 dest = self.final_schedule[self.scheduled_slot[dep[1]]].find(dep[1]).dest
+                if dest == self.code_backup[self.scheduled_slot[dep[1]]].dest:
+                    self.final_schedule[self.scheduled_slot[dep[1]]].find(dep[1]).dest = f"x{curr_inv_reg}"
+                    dest = self.final_schedule[self.scheduled_slot[dep[1]]].find(dep[1]).dest
+                    curr_inv_reg += 1
                 if self.final_schedule[self.scheduled_slot[deps.id]].find(deps.id).op1 == dep[0] and not op1:
                     self.final_schedule[self.scheduled_slot[deps.id]].find(deps.id).op1 = dest
                     op1 = True
                 if self.final_schedule[self.scheduled_slot[deps.id]].find(deps.id).op2 == dep[0] and not op2:
                     self.final_schedule[self.scheduled_slot[deps.id]].find(deps.id).op2 = dest
                     op2 = True
-                curr_inv_reg += 1
+
+        for deps in self.dep_table[self.loop_end + 1:]:
+            op1 = False
+            op2 = False
+            for dep in deps.local_dep:
+                dest = self.final_schedule[self.scheduled_slot[dep[1]]].find(dep[1]).dest
+                if dest == self.code_backup[self.scheduled_slot[dep[1]]].dest:
+                    self.final_schedule[self.scheduled_slot[dep[1]]].find(dep[1]).dest = f"x{curr_inv_reg}"
+                    dest = self.final_schedule[self.scheduled_slot[dep[1]]].find(dep[1]).dest
+                    curr_inv_reg += 1
+                if self.final_schedule[self.scheduled_slot[deps.id]].find(deps.id).op1 == dep[0] and not op1:
+                    self.final_schedule[self.scheduled_slot[deps.id]].find(deps.id).op1 = dest
+                    op1 = True
+                if self.final_schedule[self.scheduled_slot[deps.id]].find(deps.id).op2 == dep[0] and not op2:
+                    self.final_schedule[self.scheduled_slot[deps.id]].find(deps.id).op2 = dest
+                    op2 = True
 
         # post dep in BB2
         for deps in self.dep_table[self.loop_end + 1:]:
@@ -896,7 +915,6 @@ class Scheduler:
                     op2 = True
 
         # Reads invariant in BB0 or BB2
-        # TODO: test this
         for bundle in self.final_schedule:
             for instr in [bundle.alu0, bundle.alu1, bundle.mul, bundle.mem]:
                 if instr is not None:
