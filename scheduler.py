@@ -796,6 +796,21 @@ class Scheduler:
                     instr.dest = f"x{curr_reg}"
                     curr_reg += self.n_stages + 1
 
+        curr_inv_reg = 1
+
+        # local dep within BB0 or BB2
+        for instr in sorted(self.code[:self.loop_start], key=lambda x: (self.scheduled_slot[x.pc], self.final_schedule[self.scheduled_slot[x.pc]].get_id_by_instr(x))):
+            if instr.dest != "LC" and instr.opcode not in ["loop", "st"]:
+                dest = f"x{curr_inv_reg}"
+                self.final_schedule[self.scheduled_slot[instr.pc]].find(instr.pc).dest = dest
+                curr_inv_reg += 1
+
+        for instr in sorted(self.code[self.loop_end + 1:], key=lambda x: (self.scheduled_slot[x.pc], self.final_schedule[self.scheduled_slot[x.pc]].get_id_by_instr(x))):
+            if instr.dest != "LC" and instr.opcode not in ["loop", "st"]:
+                dest = f"x{curr_inv_reg}"
+                self.final_schedule[self.scheduled_slot[instr.pc]].find(instr.pc).dest = dest
+                curr_inv_reg += 1
+
         # Second phase (invariants)
         invariant_set = []
         for bundle in self.final_schedule:
@@ -805,7 +820,6 @@ class Scheduler:
                         if d not in invariant_set:
                             invariant_set.append(d)
 
-        curr_inv_reg = 1
         invariant_set.sort(key=lambda x: (self.scheduled_slot[x[1]], self.final_schedule[self.scheduled_slot[x[1]]].get_id_by_instr(self.code[x[1]])))
         for dep in invariant_set:
             self.final_schedule[self.scheduled_slot[dep[1]]].find(dep[1]).dest = f"x{curr_inv_reg}"
@@ -860,46 +874,11 @@ class Scheduler:
         for instr in self.dep_table[:self.loop_start]:
             found_dep = -1
             for loop_instr in self.dep_table[self.loop_start:self.loop_end]:
-                for dep in loop_instr.interloop_dep:
-                    if dep[0] == instr.destination and dep[1] != instr.id:
-                        found_dep = dep[1]
-                        break
-                if found_dep != -1: break
-            if found_dep != -1:
-                instr.dest = f"x{int(self.final_schedule[self.scheduled_slot[found_dep]].find(found_dep).dest[1:]) + 1}"
-
-        # local dep within BB0 or BB2
-        for deps in self.dep_table[:self.loop_start]:
-            op1 = False
-            op2 = False
-            for dep in deps.local_dep:
-                dest = self.final_schedule[self.scheduled_slot[dep[1]]].find(dep[1]).dest
-                if dest == self.code_backup[self.scheduled_slot[dep[1]]].dest:
-                    self.final_schedule[self.scheduled_slot[dep[1]]].find(dep[1]).dest = f"x{curr_inv_reg}"
-                    dest = self.final_schedule[self.scheduled_slot[dep[1]]].find(dep[1]).dest
-                    curr_inv_reg += 1
-                if self.final_schedule[self.scheduled_slot[deps.id]].find(deps.id).op1 == dep[0] and not op1:
-                    self.final_schedule[self.scheduled_slot[deps.id]].find(deps.id).op1 = dest
-                    op1 = True
-                if self.final_schedule[self.scheduled_slot[deps.id]].find(deps.id).op2 == dep[0] and not op2:
-                    self.final_schedule[self.scheduled_slot[deps.id]].find(deps.id).op2 = dest
-                    op2 = True
-
-        for deps in self.dep_table[self.loop_end + 1:]:
-            op1 = False
-            op2 = False
-            for dep in deps.local_dep:
-                dest = self.final_schedule[self.scheduled_slot[dep[1]]].find(dep[1]).dest
-                if dest == self.code_backup[self.scheduled_slot[dep[1]]].dest:
-                    self.final_schedule[self.scheduled_slot[dep[1]]].find(dep[1]).dest = f"x{curr_inv_reg}"
-                    dest = self.final_schedule[self.scheduled_slot[dep[1]]].find(dep[1]).dest
-                    curr_inv_reg += 1
-                if self.final_schedule[self.scheduled_slot[deps.id]].find(deps.id).op1 == dep[0] and not op1:
-                    self.final_schedule[self.scheduled_slot[deps.id]].find(deps.id).op1 = dest
-                    op1 = True
-                if self.final_schedule[self.scheduled_slot[deps.id]].find(deps.id).op2 == dep[0] and not op2:
-                    self.final_schedule[self.scheduled_slot[deps.id]].find(deps.id).op2 = dest
-                    op2 = True
+                for dep in list(filter(lambda x: x[1] < self.loop_start,loop_instr.interloop_dep)):
+                    if dep[0] == instr.destination and dep[1] == instr.id:
+                        found_dep = sorted(loop_instr.interloop_dep, key=lambda x: x[1])[-1][1] #Producer within loop
+            if found_dep != -1 and self.final_schedule[self.scheduled_slot[found_dep]].find(found_dep).dest[1:] != '':
+                self.final_schedule[self.scheduled_slot[instr.id]].find(instr.id).dest = f"x{int(self.final_schedule[self.scheduled_slot[found_dep]].find(found_dep).dest[1:]) + 1 - self.__stage_n(found_dep)}"
 
         # post dep in BB2
         for deps in self.dep_table[self.loop_end + 1:]:
@@ -914,21 +893,36 @@ class Scheduler:
                     self.final_schedule[self.scheduled_slot[deps.id]].find(deps.id).op2 = dest
                     op2 = True
 
-        # Reads invariant in BB0 or BB2
-        for bundle in self.final_schedule:
-            for instr in [bundle.alu0, bundle.alu1, bundle.mul, bundle.mem]:
-                if instr is not None:
-                    op1 = False
-                    op2 = False
-                    orig_instr = self.code_backup[instr.pc]
-                    for dep in self.dep_table[instr.pc].invariant_dep:
-                        dest = self.final_schedule[self.scheduled_slot[dep[1]]].find(dep[1]).dest
-                        if instr.op1 == dep[0] and not op1 and instr.op1 == orig_instr.op1:
-                            instr.op1 = dest
-                            op1 = True
-                        if instr.op2 == dep[0] and not op2 and instr.op2 == orig_instr.op2:
-                            instr.op2 = dest
-                            op2 = True
+        for deps in self.dep_table[:self.loop_start]:
+            instr = self.code_backup[deps.id]
+            for dep in deps.invariant_dep:
+                dest = self.final_schedule[self.scheduled_slot[dep[1]]].find(dep[1]).dest
+                if instr.op1 == dep[0]: 
+                    self.final_schedule[self.scheduled_slot[deps.id]].find(deps.id).op1 = dest
+                if instr.op2 == dep[0]:
+                    self.final_schedule[self.scheduled_slot[deps.id]].find(deps.id).op2 = dest
+            for dep in deps.local_dep:
+                dest = self.final_schedule[self.scheduled_slot[dep[1]]].find(dep[1]).dest
+                if instr.op1 == dep[0]: 
+                    self.final_schedule[self.scheduled_slot[deps.id]].find(deps.id).op1 = dest
+                if instr.op2 == dep[0]:
+                    self.final_schedule[self.scheduled_slot[deps.id]].find(deps.id).op2 = dest
+
+        for deps in self.dep_table[self.loop_end + 1:]:
+            instr = self.code_backup[deps.id]
+            for dep in deps.invariant_dep:
+                dest = self.final_schedule[self.scheduled_slot[dep[1]]].find(dep[1]).dest
+                if instr.op1 == dep[0]: 
+                    self.final_schedule[self.scheduled_slot[deps.id]].find(deps.id).op1 = dest
+                if instr.op2 == dep[0]:
+                    self.final_schedule[self.scheduled_slot[deps.id]].find(deps.id).op2 = dest
+            for dep in deps.local_dep:
+                dest = self.final_schedule[self.scheduled_slot[dep[1]]].find(dep[1]).dest
+                if instr.op1 == dep[0]: 
+                    self.final_schedule[self.scheduled_slot[deps.id]].find(deps.id).op1 = dest
+                if instr.op2 == dep[0]:
+                    self.final_schedule[self.scheduled_slot[deps.id]].find(deps.id).op2 = dest
+
 
     def __prepare_loop_pip(self):
         end_loop = self.scheduled_slot[self.loop_end]

@@ -86,7 +86,7 @@ class Fuzzer:
 
 
 fuzzer = Fuzzer()
-errors = fuzzer.test(10)
+errors = fuzzer.test(100)
 
 for i, error in enumerate(errors):
     with open(f"errors/code_error_{i}_1.json", "w") as file:
