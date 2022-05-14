@@ -75,7 +75,7 @@ class Fuzzer:
         errors = []
         for test in tests:
             gianlu = main_gianlu.do_stuff(json.dumps(test))
-            for i, pip in enumerate([True], 1):#, True]):
+            for i, pip in enumerate([False, True]):
                 sim1 = sawo.Scheduler(test, pip)
                 res2 = vliw470.simulate(json.loads(gianlu[i]))
                 res1 = vliw470.simulate(json.loads(sim1.get_schedule_dump()))
@@ -87,7 +87,7 @@ class Fuzzer:
 
 
 fuzzer = Fuzzer()
-errors = fuzzer.test(5)
+errors = fuzzer.test(10000)
 
 for i, error in enumerate(errors):
     with open(f"errors/code_error_{i}_1.json", "w") as file:
