@@ -225,11 +225,13 @@ class Scheduler:
             self.__prepare_loop_pip()
 
         if dump_to_file:
-            self.dump_json(f"{filename[:filename.find('.json')]}_out_{'loop_pip' if pip else 'loop'}.json")
+            out_filename = f"{filename[:filename.find('.json')]}_out_{'loop_pip' if pip else 'loop'}.json"
+            self.dump_json(out_filename)
+            print(f"Output schedule has been saved to: {out_filename}")
         else:
-            pass
-            print(self.get_schedule_dump())
-                #print(self.ii)
+            print(f"Schedule: \n{self.get_schedule_dump()}")
+        
+
 
     def __get_latency(self, opcode):
         return 3 if opcode == "mulu" else 1
@@ -240,14 +242,8 @@ class Scheduler:
 
     def __parse_json(self):
         output = []
-        # TODO: remove this
-        if isinstance(self.filename, str):
-            file = open(self.filename, "r")
-            program = json.load(file)
-        else:
-            file = json.dumps(self.filename)
-            program = json.loads(file)
-
+        file = open(self.filename, "r")
+        program = json.load(file)
         for PC, instruction in enumerate(program):
             opcode = instruction.split(" ")[0].strip()
             registers = instruction[instruction.find(" "):].split(",")
@@ -281,6 +277,7 @@ class Scheduler:
             output.append(Instruction(PC, opcode, destination_register, operand_1, operand_2))
         return output
 
+    ''' Computes the dependency table for the given program'''
     def __compute_deps(self):
         dep_table = []
         loop_start = -1
@@ -390,6 +387,7 @@ class Scheduler:
             for i in range(len(self.final_schedule)):
                 self.final_schedule[i].pc = i
 
+    ''' Computes a valid schedule with the loop instruction '''
     def __schedule_loop(self):
         pc = 0
         scheduled_slot = [-10 for i in range(len(self.dep_table))]
@@ -457,27 +455,8 @@ class Scheduler:
 
         self.scheduled_slot = scheduled_slot
 
-    '''
-    def __compute_available_regs(self):
-        regs = [f"x{i}" for i in range(1, 32)]
-        regs = set(regs)
-        for instr in self.code:
-            try:
-                if instr.op1 is not None and instr.op1.startswith("x"):
-                    regs.remove(instr.op1)
-            except KeyError:
-                pass
-            try:
-                if instr.op2 is not None and instr.op2.startswith("x"):
-                    regs.remove(instr.op2)
-            except KeyError:
-                pass
-        for instr in self.code:
-            if instr.dest is not None and instr.dest.startswith("x"):
-                regs.add(instr.dest)
-        return sorted(regs, key=lambda x: int(x[1:]))
-    '''
 
+    '''Computes the minimum ii to start with'''
     def __compute_min_ii(self):
         frequency = [0 for i in range(4)]
         for instr in self.code[self.loop_start:self.loop_end]:
@@ -494,6 +473,7 @@ class Scheduler:
         frequency[0] = math.ceil(frequency[0] / 2)  # We got two ALUs
         return max(frequency)
 
+    '''Bundles dependencies of the same register together'''
     def __filter_deps(self, deps):
         res = []
         sorted_deps = sorted(deps, key=lambda x: int(x[0][1:]))
@@ -516,16 +496,6 @@ class Scheduler:
     def __register_rename_loop(self):
         # Destination Register Allocation
         available_regs = [f"x{i}" for i in range(1, 32)]
-        '''
-        for i, instr in enumerate(sorted(self.code, key=lambda x: self.scheduled_slot[x.pc])):
-            if i == 0:continue
-            op1, op2 = False, False
-            for j, prev_instr in enumerate(self.code[:i]):
-                if prev_instr.dest == instr.op1: op1 = True
-                if prev_instr.dest == instr.op2: op2 = True
-            if not op1 and available_regs.count(instr.op1):available_regs.remove(instr.op1)
-            if not op2 and available_regs.count(instr.op2):available_regs.remove(instr.op2)
-        '''
 
         for bundle in self.final_schedule:
             for instr in [bundle.alu0, bundle.alu1, bundle.mul, bundle.mem]:

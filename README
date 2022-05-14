@@ -1,0 +1,6 @@
+In order to run the scheduler on a test, provide the name as command-line argument.
+ex. --> python main.py filename.json
+
+The two required schedules as json outputs will be placed in the same folder of the test and will have the following names:
+- **loop**: filename_out_loop.json
+- **loop-pip**: filename_out_loop_pip.json

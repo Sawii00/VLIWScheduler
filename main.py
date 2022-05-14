@@ -1,11 +1,10 @@
 from scheduler import Scheduler
-from VLIWCompiler import VLIWCompiler
-import json
+import sys
 
-#sched = Scheduler("tests_3.json")
-file = open("errors/test2.json")
-sched_pip = Scheduler("handout.json", pip=False, dump_to_file=True)
-vliw_compiler_looppip = VLIWCompiler("test.json")
-res2 = vliw_compiler_looppip.compile(json.dumps(json.load(file)))
+if len(sys.argv) != 2:
+    print("Usage: python main.py filename")
+    exit(-1)
 
-# Cannot use LC or EC or any predicate as operand
+sched_loop = Scheduler(sys.argv[1], pip=False, dump_to_file=True)
+sched_loop_pip = Scheduler(sys.argv[1], pip=True , dump_to_file=True)
+

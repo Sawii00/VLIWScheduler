@@ -82,12 +82,11 @@ class Fuzzer:
                 if json.dumps(res1.data, sort_keys=True) != json.dumps(res2.data, sort_keys=True):
                     print("Mismatch found")
                     errors.append((test, json.loads(sim1.get_schedule_dump()), json.loads(gianlu[i])))
-                errors.append((test, json.loads(sim1.get_schedule_dump()), json.loads(gianlu[i])))
         return errors
 
 
 fuzzer = Fuzzer()
-errors = fuzzer.test(10000)
+errors = fuzzer.test(1000)
 
 for i, error in enumerate(errors):
     with open(f"errors/code_error_{i}_1.json", "w") as file:
