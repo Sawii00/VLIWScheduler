@@ -225,10 +225,10 @@ class Scheduler:
             self.__prepare_loop_pip()
 
         if dump_to_file:
-            self.dump_json(f"{filename[:filename.find('.json')]}_out.json")
+            self.dump_json(f"{filename[:filename.find('.json')]}_out_{'loop_pip' if pip else 'loop'}.json")
         else:
             pass
-            #print(self.get_schedule_dump())
+            print(self.get_schedule_dump())
                 #print(self.ii)
 
     def __get_latency(self, opcode):

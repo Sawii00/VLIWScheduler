@@ -70,7 +70,7 @@ class Fuzzer:
             tests.append(code)
         return tests
 
-    def test(self, n=10, pre_length=5, loop_length=8, post_length=4):
+    def test(self, n=10, pre_length=3, loop_length=5, post_length=3):
         tests = self.generate_tests(n, pre_length, loop_length, post_length)
         errors = []
         for test in tests:
@@ -82,11 +82,12 @@ class Fuzzer:
                 if json.dumps(res1.data, sort_keys=True) != json.dumps(res2.data, sort_keys=True):
                     print("Mismatch found")
                     errors.append((test, json.loads(sim1.get_schedule_dump()), json.loads(gianlu[i])))
+                errors.append((test, json.loads(sim1.get_schedule_dump()), json.loads(gianlu[i])))
         return errors
 
 
 fuzzer = Fuzzer()
-errors = fuzzer.test(100)
+errors = fuzzer.test(5)
 
 for i, error in enumerate(errors):
     with open(f"errors/code_error_{i}_1.json", "w") as file:

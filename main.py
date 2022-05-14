@@ -3,8 +3,8 @@ from VLIWCompiler import VLIWCompiler
 import json
 
 #sched = Scheduler("tests_3.json")
-file = open("errors/code_error_0_1.json")
-sched_pip = Scheduler("errors/code_error_0_1.json", pip=True, dump_to_file=False)
+file = open("errors/test2.json")
+sched_pip = Scheduler("handout.json", pip=False, dump_to_file=True)
 vliw_compiler_looppip = VLIWCompiler("test.json")
 res2 = vliw_compiler_looppip.compile(json.dumps(json.load(file)))
 
