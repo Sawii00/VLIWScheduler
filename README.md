@@ -7,8 +7,10 @@ The scheduler has to perform both scheduling and register renaming to produce an
 
 In order to run the scheduler on a test, provide the name as command-line argument.
 
-python main.py filename.json
+```python main.py filename.json```
 
 The two required schedules as json outputs will be placed in the same folder of the test and will have the following names:
 - **loop**: filename_out_loop.json
 - **loop-pip**: filename_out_loop_pip.json
+
+Assignment: https://drive.google.com/file/d/1BBzMDDWmBFgF3gbrl8fMgozb5kBuG3jR/view?usp=sharing
